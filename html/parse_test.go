@@ -518,6 +518,61 @@ func TestIssue70179(t *testing.T) {
 	}
 }
 
+func TestDuplicateAttributes(t *testing.T) {
+	// Browsers keep only the first occurrence of an attribute name (compared
+	// ASCII case-insensitively) and ignore later duplicates. The parsed tree
+	// must agree, otherwise code that inspects the tree (e.g. a sanitizer) and
+	// a browser interpreting the rendered output disagree about the attributes.
+	for _, tc := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			"same case",
+			`<a href="https://example.com/" href="javascript:alert(1)">x</a>`,
+			`<a href="https://example.com/">x</a>`,
+		},
+		{
+			"different case",
+			`<img src="x" SRC="y" ONERROR="alert(1)" onerror="z"/>`,
+			`<img src="x" onerror="alert(1)"/>`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := Parse(strings.NewReader(tc.input))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			// doc -> <html> -> <body> -> element.
+			n := doc.FirstChild.LastChild.FirstChild
+			var b strings.Builder
+			if err := Render(&b, n); err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if got := b.String(); got != tc.want {
+				t.Errorf("Parse: got %q, want %q", got, tc.want)
+			}
+
+			body := &Node{Type: ElementNode, Data: "body", DataAtom: atom.Body}
+			nodes, err := ParseFragment(strings.NewReader(tc.input), body)
+			if err != nil {
+				t.Fatalf("ParseFragment: %v", err)
+			}
+			if len(nodes) != 1 {
+				t.Fatalf("ParseFragment: got %d nodes, want 1", len(nodes))
+			}
+			b.Reset()
+			if err := Render(&b, nodes[0]); err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if got := b.String(); got != tc.want {
+				t.Errorf("ParseFragment: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDepthLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
